@@ -190,7 +190,6 @@ let micOn = true, camOn = true;
 let unsubscribers = [];
 let callStarted = false;
 
-// Debug log — shows in chat panel so you don't need devtools
 function dbg(msg) {
   console.log('[DBG]', msg);
   const msgs = document.getElementById('chat-messages');
@@ -217,7 +216,7 @@ window.connect = async function() {
   roomId = await hashRoom(secret);
   document.getElementById('setup-screen').style.display = 'none';
   document.getElementById('app-screen').style.display = 'flex';
-  dbg('roomId: ' + roomId.slice(0,8) + '...');
+  dbg('room hash: ' + roomId.slice(0,8) + '...');
   await startMedia();
   await joinRoom();
 };
@@ -230,81 +229,91 @@ async function startMedia() {
   } catch(e) {
     try {
       localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      setStatus('Audio only (no camera)', 'connecting');
-      dbg('mic only (no camera)');
+      setStatus('Audio only', 'connecting');
+      dbg('mic only');
     } catch(e2) {
       setStatus('No media access', 'error');
-      dbg('ERROR: no media — ' + e2.message);
+      dbg('ERROR: ' + e2.message);
     }
   }
 }
 
 async function joinRoom() {
   const now = Date.now();
-  dbg('reading room from Firebase...');
+
+  // KEY FIX: use a presence node with online flag
+  // Caller writes online:true, onDisconnect sets online:false (NOT remove)
+  // So data survives reload, we just check the online flag + timestamp
 
   let snap;
   try {
-    snap = await get(ref(db, `rooms/${roomId}`));
+    snap = await get(ref(db, `rooms/${roomId}/caller`));
   } catch(e) {
-    dbg('ERROR reading Firebase: ' + e.message);
-    setStatus('Firebase error: ' + e.message, 'error');
+    dbg('Firebase read error: ' + e.message);
+    setStatus('Firebase error', 'error');
     return;
   }
 
-  const data = snap.val();
-  dbg('room data: ' + JSON.stringify(data ? Object.keys(data) : null));
+  const callerData = snap.val();
+  dbg('caller in DB: ' + JSON.stringify(callerData));
 
-  const callerFresh = data && data.caller && (now - (data.caller.ts || 0) < 20000);
-  dbg('callerFresh: ' + callerFresh + (data && data.caller ? ', age: ' + Math.round((now - data.caller.ts)/1000) + 's' : ''));
+  // Caller is valid if: exists, online=true, and timestamp < 30s ago
+  const isOnline = callerData && callerData.online === true;
+  const age = callerData && callerData.ts ? Math.round((now - callerData.ts) / 1000) : 999;
+  const callerValid = isOnline && age < 30;
+  dbg('callerValid: ' + callerValid + ', online: ' + isOnline + ', age: ' + age + 's');
 
-  if (!callerFresh) {
-    // Become CALLER
-    dbg('becoming CALLER, wiping old data...');
-    try { await remove(ref(db, `rooms/${roomId}`)); } catch(e) { dbg('remove err (ok): ' + e.message); }
+  if (!callerValid) {
+    // CALLER role
+    // Clean everything first
+    try { await remove(ref(db, `rooms/${roomId}`)); } catch(e) {}
 
     myRole = 'caller';
-    await set(ref(db, `rooms/${roomId}/caller`), { name: myName, ts: now });
-    onDisconnect(ref(db, `rooms/${roomId}`)).remove();
-    dbg('wrote caller to Firebase, waiting for callee...');
+    const callerRef = ref(db, `rooms/${roomId}/caller`);
+    await set(callerRef, { name: myName, ts: now, online: true });
+
+    // On disconnect: mark offline but keep data so callee can still read ts
+    onDisconnect(callerRef).set({ name: myName, ts: now, online: false });
 
     setStatus('Waiting for peer...', 'connecting');
     showWaiting(true);
+    dbg('I am CALLER, waiting for callee...');
 
     const unsub = onValue(ref(db, `rooms/${roomId}/callee`), async (s) => {
-      dbg('callee snapshot exists: ' + s.exists() + ', callStarted: ' + callStarted);
+      dbg('callee watcher fired, exists: ' + s.exists() + ', started: ' + callStarted);
       if (s.exists() && !callStarted) {
         callStarted = true;
         showWaiting(false);
-        setStatus('Peer joined — establishing P2P...', 'connecting');
+        setStatus('Peer joined — connecting P2P...', 'connecting');
         await startCall(true);
       }
     });
     unsubscribers.push(unsub);
 
   } else {
-    // Become CALLEE
-    dbg('becoming CALLEE, clearing stale signaling...');
+    // CALLEE role
+    // Clean only signaling data, keep caller presence
     try {
       await remove(ref(db, `rooms/${roomId}/offer`));
       await remove(ref(db, `rooms/${roomId}/answer`));
       await remove(ref(db, `rooms/${roomId}/callerCandidates`));
       await remove(ref(db, `rooms/${roomId}/calleeCandidates`));
-    } catch(e) { dbg('clear err (ok): ' + e.message); }
+    } catch(e) {}
 
     myRole = 'callee';
-    await set(ref(db, `rooms/${roomId}/callee`), { name: myName, ts: now });
-    onDisconnect(ref(db, `rooms/${roomId}/callee`)).remove();
-    dbg('wrote callee to Firebase, starting call...');
+    const calleeRef = ref(db, `rooms/${roomId}/callee`);
+    await set(calleeRef, { name: myName, ts: now, online: true });
+    onDisconnect(calleeRef).remove();
 
     showWaiting(false);
-    setStatus('Caller found — establishing P2P...', 'connecting');
+    setStatus('Caller found — connecting P2P...', 'connecting');
+    dbg('I am CALLEE, starting call...');
     await startCall(false);
   }
 
-  // Watch for disconnects
-  const watchUnsub = onValue(ref(db, `rooms/${roomId}`), (s) => {
-    if (!s.exists() && myRole === 'callee') {
+  // Watch caller going offline
+  const watchUnsub = onValue(ref(db, `rooms/${roomId}/caller`), (s) => {
+    if (myRole === 'callee' && s.exists() && s.val().online === false) {
       setStatus('Peer disconnected', 'error');
       addSystemMsg('Peer disconnected — reload to reconnect');
       showWaiting(true);
@@ -317,14 +326,14 @@ async function joinRoom() {
 }
 
 async function startCall(isCaller) {
-  dbg('startCall isCaller=' + isCaller);
+  dbg('startCall, isCaller=' + isCaller);
   if (pc) { pc.close(); }
   pc = new RTCPeerConnection(iceConfig);
 
   if (localStream) localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
 
   pc.ontrack = (e) => {
-    dbg('got remote track');
+    dbg('got remote track!');
     document.getElementById('remote-video').srcObject = e.streams[0];
     document.getElementById('video-placeholder').style.display = 'none';
   };
@@ -336,13 +345,12 @@ async function startCall(isCaller) {
     await set(ref(db, `rooms/${roomId}/${key}/${id}`), JSON.stringify(e.candidate.toJSON()));
   };
 
-  pc.oniceconnectionstatechange = () => dbg('ICE state: ' + pc.iceConnectionState);
-
+  pc.oniceconnectionstatechange = () => dbg('ICE: ' + pc.iceConnectionState);
   pc.onconnectionstatechange = () => {
     const s = pc.connectionState;
-    dbg('connection state: ' + s);
+    dbg('P2P state: ' + s);
     if (s === 'connected') {
-      setStatus('Secure P2P · encrypted', 'connected');
+      setStatus('🔐 Secure P2P · encrypted', 'connected');
       addSystemMsg('🔐 P2P connection established · end-to-end encrypted');
     } else if (s === 'failed') {
       setStatus('P2P failed — try reloading', 'error');
@@ -356,20 +364,18 @@ async function startCall(isCaller) {
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     await set(ref(db, `rooms/${roomId}/offer`), JSON.stringify({ type: offer.type, sdp: offer.sdp }));
-    dbg('offer written to Firebase');
+    dbg('offer written');
 
     const unsub = onValue(ref(db, `rooms/${roomId}/answer`), async (s) => {
       if (!s.exists() || pc.currentRemoteDescription) return;
-      dbg('got answer from Firebase');
+      dbg('got answer');
       await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(s.val())));
     });
     unsubscribers.push(unsub);
 
     const candUnsub = onValue(ref(db, `rooms/${roomId}/calleeCandidates`), (s) => {
       if (!s.exists() || !pc.remoteDescription) return;
-      s.forEach(child => {
-        pc.addIceCandidate(new RTCIceCandidate(JSON.parse(child.val()))).catch(() => {});
-      });
+      s.forEach(child => pc.addIceCandidate(new RTCIceCandidate(JSON.parse(child.val()))).catch(()=>{}));
     });
     unsubscribers.push(candUnsub);
 
@@ -378,28 +384,26 @@ async function startCall(isCaller) {
 
     const unsub = onValue(ref(db, `rooms/${roomId}/offer`), async (s) => {
       if (!s.exists() || pc.currentRemoteDescription) return;
-      dbg('got offer from Firebase');
+      dbg('got offer');
       const offer = JSON.parse(s.val());
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       await set(ref(db, `rooms/${roomId}/answer`), JSON.stringify({ type: answer.type, sdp: answer.sdp }));
-      dbg('answer written to Firebase');
+      dbg('answer written');
     });
     unsubscribers.push(unsub);
 
     const candUnsub = onValue(ref(db, `rooms/${roomId}/callerCandidates`), (s) => {
       if (!s.exists() || !pc.remoteDescription) return;
-      s.forEach(child => {
-        pc.addIceCandidate(new RTCIceCandidate(JSON.parse(child.val()))).catch(() => {});
-      });
+      s.forEach(child => pc.addIceCandidate(new RTCIceCandidate(JSON.parse(child.val()))).catch(()=>{}));
     });
     unsubscribers.push(candUnsub);
   }
 }
 
 function setupDataChannel(dc) {
-  dc.onopen = () => { dbg('dataChannel open'); document.getElementById('send-btn').disabled = false; };
+  dc.onopen = () => { dbg('chat open!'); document.getElementById('send-btn').disabled = false; };
   dc.onclose = () => { document.getElementById('send-btn').disabled = true; };
   dc.onmessage = (e) => { const d = JSON.parse(e.data); addMessage(d.text, d.name, false); };
 }
