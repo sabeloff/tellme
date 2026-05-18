@@ -163,7 +163,7 @@
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getDatabase, ref, set, get, onValue, remove, onDisconnect } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+import { getDatabase, ref, set, get, onValue, remove, onDisconnect, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCYrOEgoEIwZ3i6BHqbW9dScpjXirS1IVA",
@@ -240,49 +240,54 @@ async function startMedia() {
 
 async function joinRoom() {
   const now = Date.now();
+  const callerRef = ref(db, `rooms/${roomId}/caller`);
+  let iAmCaller = false;
 
-  // KEY FIX: use a presence node with online flag
-  // Caller writes online:true, onDisconnect sets online:false (NOT remove)
-  // So data survives reload, we just check the online flag + timestamp
+  dbg('running transaction to claim caller role...');
 
-  let snap;
   try {
-    snap = await get(ref(db, `rooms/${roomId}/caller`));
+    const result = await runTransaction(callerRef, (current) => {
+      // If no caller, or caller is stale (offline or old) — claim it
+      if (!current || current.online === false || (now - (current.ts || 0)) > 30000) {
+        return { name: myName, ts: now, online: true };
+      }
+      // Caller already exists and is fresh — abort (return undefined)
+      return undefined;
+    });
+
+    if (result.committed) {
+      iAmCaller = true;
+      dbg('transaction committed — I am CALLER');
+    } else {
+      iAmCaller = false;
+      dbg('transaction aborted — I am CALLEE');
+    }
   } catch(e) {
-    dbg('Firebase read error: ' + e.message);
+    dbg('transaction error: ' + e.message);
     setStatus('Firebase error', 'error');
     return;
   }
 
-  const callerData = snap.val();
-  dbg('caller in DB: ' + JSON.stringify(callerData));
-
-  // Caller is valid if: exists, online=true, and timestamp < 30s ago
-  const isOnline = callerData && callerData.online === true;
-  const age = callerData && callerData.ts ? Math.round((now - callerData.ts) / 1000) : 999;
-  const callerValid = isOnline && age < 30;
-  dbg('callerValid: ' + callerValid + ', online: ' + isOnline + ', age: ' + age + 's');
-
-  if (!callerValid) {
+  if (iAmCaller) {
     // CALLER role
-    // Clean everything first
-    try { await remove(ref(db, `rooms/${roomId}`)); } catch(e) {}
-
     myRole = 'caller';
-    const callerRef = ref(db, `rooms/${roomId}/caller`);
-    await set(callerRef, { name: myName, ts: now, online: true });
-
-    // On disconnect: mark offline but keep data so callee can still read ts
-    onDisconnect(callerRef).set({ name: myName, ts: now, online: false });
+    onDisconnect(callerRef).update({ online: false });
 
     setStatus('Waiting for peer...', 'connecting');
     showWaiting(true);
-    dbg('I am CALLER, waiting for callee...');
+    dbg('waiting for callee...');
 
     const unsub = onValue(ref(db, `rooms/${roomId}/callee`), async (s) => {
-      dbg('callee watcher fired, exists: ' + s.exists() + ', started: ' + callStarted);
+      dbg('callee watcher: exists=' + s.exists() + ' started=' + callStarted);
       if (s.exists() && !callStarted) {
         callStarted = true;
+        // Clean stale signaling before starting
+        try {
+          await remove(ref(db, `rooms/${roomId}/offer`));
+          await remove(ref(db, `rooms/${roomId}/answer`));
+          await remove(ref(db, `rooms/${roomId}/callerCandidates`));
+          await remove(ref(db, `rooms/${roomId}/calleeCandidates`));
+        } catch(e) {}
         showWaiting(false);
         setStatus('Peer joined — connecting P2P...', 'connecting');
         await startCall(true);
@@ -292,14 +297,6 @@ async function joinRoom() {
 
   } else {
     // CALLEE role
-    // Clean only signaling data, keep caller presence
-    try {
-      await remove(ref(db, `rooms/${roomId}/offer`));
-      await remove(ref(db, `rooms/${roomId}/answer`));
-      await remove(ref(db, `rooms/${roomId}/callerCandidates`));
-      await remove(ref(db, `rooms/${roomId}/calleeCandidates`));
-    } catch(e) {}
-
     myRole = 'callee';
     const calleeRef = ref(db, `rooms/${roomId}/callee`);
     await set(calleeRef, { name: myName, ts: now, online: true });
@@ -312,8 +309,8 @@ async function joinRoom() {
   }
 
   // Watch caller going offline
-  const watchUnsub = onValue(ref(db, `rooms/${roomId}/caller`), (s) => {
-    if (myRole === 'callee' && s.exists() && s.val().online === false) {
+  const watchUnsub = onValue(callerRef, (s) => {
+    if (myRole === 'callee' && s.exists() && s.val() && s.val().online === false) {
       setStatus('Peer disconnected', 'error');
       addSystemMsg('Peer disconnected — reload to reconnect');
       showWaiting(true);
