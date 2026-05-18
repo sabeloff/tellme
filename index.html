@@ -16,7 +16,6 @@
     --mono:'JetBrains Mono',monospace; --sans:'Syne',sans-serif;
   }
   body { background:var(--bg); color:var(--text); font-family:var(--sans); height:100vh; overflow:hidden; display:flex; flex-direction:column; }
-
   #setup-screen { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; gap:2rem; padding:2rem; animation:fadeIn 0.6s ease; }
   .logo { display:flex; flex-direction:column; align-items:center; gap:0.5rem; }
   .logo-icon { width:64px; height:64px; border-radius:16px; background:linear-gradient(135deg,#7c5cfc,#a388ff); display:flex; align-items:center; justify-content:center; font-size:28px; }
@@ -31,7 +30,6 @@
   .connect-btn:hover { background:var(--accent2); transform:translateY(-1px); }
   .connect-btn:disabled { opacity:0.5; cursor:not-allowed; transform:none; }
   .hint { font-family:var(--mono); font-size:0.7rem; color:var(--text3); text-align:center; line-height:1.7; }
-
   #app-screen { display:none; height:100vh; flex-direction:column; }
   .header { background:var(--bg2); border-bottom:1px solid var(--border); padding:0.75rem 1.25rem; display:flex; align-items:center; justify-content:space-between; flex-shrink:0; }
   .header-left { display:flex; align-items:center; gap:0.75rem; }
@@ -42,7 +40,7 @@
   .status-dot.error { background:var(--red); }
   .status-label { font-family:var(--mono); font-size:0.7rem; color:var(--text3); letter-spacing:0.1em; }
   .header-right { display:flex; align-items:center; gap:0.5rem; }
-  .icon-btn { width:36px; height:36px; border-radius:8px; background:transparent; border:1px solid var(--border); color:var(--text2); cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:18px; transition:all 0.2s; font-family:var(--mono); }
+  .icon-btn { width:36px; height:36px; border-radius:8px; background:transparent; border:1px solid var(--border); color:var(--text2); cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:18px; transition:all 0.2s; }
   .icon-btn:hover { background:var(--bg3); border-color:var(--border2); color:var(--text); }
   .icon-btn.active { background:var(--accent); border-color:var(--accent); color:white; }
   .icon-btn.danger { border-color:rgba(248,113,113,0.3); }
@@ -54,8 +52,7 @@
   .video-placeholder { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1rem; color:var(--text3); }
   .avatar-big { width:80px; height:80px; border-radius:50%; background:var(--bg3); border:2px solid var(--border); display:flex; align-items:center; justify-content:center; font-size:32px; }
   .video-placeholder p { font-family:var(--mono); font-size:0.8rem; letter-spacing:0.1em; }
-  #local-video-wrap { position:absolute; bottom:1rem; right:1rem; width:160px; height:120px; border-radius:12px; overflow:hidden; border:2px solid var(--border2); background:var(--bg3); cursor:pointer; transition:transform 0.2s; z-index:10; }
-  #local-video-wrap:hover { transform:scale(1.05); }
+  #local-video-wrap { position:absolute; bottom:1rem; right:1rem; width:160px; height:120px; border-radius:12px; overflow:hidden; border:2px solid var(--border2); background:var(--bg3); z-index:10; }
   #local-video { width:100%; height:100%; object-fit:cover; transform:scaleX(-1); display:block; }
   .video-controls { background:var(--bg2); border-top:1px solid var(--border); padding:0.75rem 1rem; display:flex; align-items:center; justify-content:center; gap:0.75rem; flex-shrink:0; }
   .chat-panel { width:320px; border-left:1px solid var(--border); display:flex; flex-direction:column; background:var(--bg2); flex-shrink:0; }
@@ -70,7 +67,8 @@
   .msg.mine .msg-bubble { background:var(--accent); color:white; border-bottom-right-radius:4px; }
   .msg.theirs .msg-bubble { background:var(--bg3); border:1px solid var(--border); color:var(--text); border-bottom-left-radius:4px; }
   .msg-time { font-family:var(--mono); font-size:0.65rem; color:var(--text3); padding:0 0.25rem; }
-  .system-msg { align-self:center; font-family:var(--mono); font-size:0.68rem; color:var(--text3); letter-spacing:0.1em; background:var(--bg3); padding:0.3rem 0.75rem; border-radius:20px; border:1px solid var(--border); }
+  .system-msg { align-self:center; font-family:var(--mono); font-size:0.68rem; color:var(--text3); letter-spacing:0.1em; background:var(--bg3); padding:0.3rem 0.75rem; border-radius:20px; border:1px solid var(--border); text-align:center; }
+  .system-msg.debug { color:#fbbf24; border-color:rgba(251,191,36,0.3); font-size:0.62rem; }
   .chat-input-wrap { padding:0.75rem; border-top:1px solid var(--border); display:flex; gap:0.5rem; flex-shrink:0; }
   .chat-input { flex:1; background:var(--bg3); border:1px solid var(--border); border-radius:8px; padding:0.65rem 0.85rem; font-family:var(--sans); font-size:0.88rem; color:var(--text); outline:none; resize:none; height:40px; transition:border-color 0.2s; }
   .chat-input:focus { border-color:var(--accent); }
@@ -147,7 +145,7 @@
       <div class="video-controls">
         <button class="icon-btn active" id="btn-mic" onclick="toggleMic()">🎤</button>
         <button class="icon-btn active" id="btn-cam" onclick="toggleCam()">📷</button>
-        <button class="icon-btn danger" onclick="hangup()" style="padding:0 1rem;width:auto;font-family:var(--sans);font-size:0.75rem;letter-spacing:0.05em;">✕ &nbsp;Disconnect</button>
+        <button class="icon-btn danger" onclick="hangup()" style="padding:0 1rem;width:auto;font-family:var(--sans);font-size:0.75rem;">✕ &nbsp;Disconnect</button>
       </div>
     </div>
     <div class="chat-panel">
@@ -192,6 +190,18 @@ let micOn = true, camOn = true;
 let unsubscribers = [];
 let callStarted = false;
 
+// Debug log — shows in chat panel so you don't need devtools
+function dbg(msg) {
+  console.log('[DBG]', msg);
+  const msgs = document.getElementById('chat-messages');
+  if (!msgs) return;
+  const div = document.createElement('div');
+  div.className = 'system-msg debug';
+  div.textContent = '⚙ ' + msg;
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
 async function hashRoom(secret) {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(secret));
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('').slice(0, 32);
@@ -207,6 +217,7 @@ window.connect = async function() {
   roomId = await hashRoom(secret);
   document.getElementById('setup-screen').style.display = 'none';
   document.getElementById('app-screen').style.display = 'flex';
+  dbg('roomId: ' + roomId.slice(0,8) + '...');
   await startMedia();
   await joinRoom();
 };
@@ -215,40 +226,53 @@ async function startMedia() {
   try {
     localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
     document.getElementById('local-video').srcObject = localStream;
+    dbg('camera + mic OK');
   } catch(e) {
     try {
       localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       setStatus('Audio only (no camera)', 'connecting');
+      dbg('mic only (no camera)');
     } catch(e2) {
-      setStatus('No media access — check permissions', 'error');
+      setStatus('No media access', 'error');
+      dbg('ERROR: no media — ' + e2.message);
     }
   }
 }
 
 async function joinRoom() {
   const now = Date.now();
+  dbg('reading room from Firebase...');
 
-  // Read current room state
-  const snap = await get(ref(db, `rooms/${roomId}`));
+  let snap;
+  try {
+    snap = await get(ref(db, `rooms/${roomId}`));
+  } catch(e) {
+    dbg('ERROR reading Firebase: ' + e.message);
+    setStatus('Firebase error: ' + e.message, 'error');
+    return;
+  }
+
   const data = snap.val();
+  dbg('room data: ' + JSON.stringify(data ? Object.keys(data) : null));
 
-  // Caller is "stale" if older than 20 seconds (means they disconnected without cleanup)
   const callerFresh = data && data.caller && (now - (data.caller.ts || 0) < 20000);
+  dbg('callerFresh: ' + callerFresh + (data && data.caller ? ', age: ' + Math.round((now - data.caller.ts)/1000) + 's' : ''));
 
   if (!callerFresh) {
-    // ---- Become CALLER ----
-    // Wipe any leftover data from previous session
-    await remove(ref(db, `rooms/${roomId}`));
+    // Become CALLER
+    dbg('becoming CALLER, wiping old data...');
+    try { await remove(ref(db, `rooms/${roomId}`)); } catch(e) { dbg('remove err (ok): ' + e.message); }
 
     myRole = 'caller';
     await set(ref(db, `rooms/${roomId}/caller`), { name: myName, ts: now });
     onDisconnect(ref(db, `rooms/${roomId}`)).remove();
+    dbg('wrote caller to Firebase, waiting for callee...');
 
     setStatus('Waiting for peer...', 'connecting');
     showWaiting(true);
 
-    // Watch for callee to arrive
     const unsub = onValue(ref(db, `rooms/${roomId}/callee`), async (s) => {
+      dbg('callee snapshot exists: ' + s.exists() + ', callStarted: ' + callStarted);
       if (s.exists() && !callStarted) {
         callStarted = true;
         showWaiting(false);
@@ -259,36 +283,33 @@ async function joinRoom() {
     unsubscribers.push(unsub);
 
   } else {
-    // ---- Become CALLEE ----
-    // Clean any stale signaling from a previous attempt
-    await remove(ref(db, `rooms/${roomId}/offer`));
-    await remove(ref(db, `rooms/${roomId}/answer`));
-    await remove(ref(db, `rooms/${roomId}/callerCandidates`));
-    await remove(ref(db, `rooms/${roomId}/calleeCandidates`));
+    // Become CALLEE
+    dbg('becoming CALLEE, clearing stale signaling...');
+    try {
+      await remove(ref(db, `rooms/${roomId}/offer`));
+      await remove(ref(db, `rooms/${roomId}/answer`));
+      await remove(ref(db, `rooms/${roomId}/callerCandidates`));
+      await remove(ref(db, `rooms/${roomId}/calleeCandidates`));
+    } catch(e) { dbg('clear err (ok): ' + e.message); }
 
     myRole = 'callee';
     await set(ref(db, `rooms/${roomId}/callee`), { name: myName, ts: now });
     onDisconnect(ref(db, `rooms/${roomId}/callee`)).remove();
+    dbg('wrote callee to Firebase, starting call...');
 
     showWaiting(false);
     setStatus('Caller found — establishing P2P...', 'connecting');
     await startCall(false);
   }
 
-  // Watch for peer going away
+  // Watch for disconnects
   const watchUnsub = onValue(ref(db, `rooms/${roomId}`), (s) => {
-    if (!s.exists()) {
-      if (myRole === 'callee') {
-        setStatus('Peer disconnected', 'error');
-        addSystemMsg('Peer disconnected — reload to reconnect');
-        showWaiting(true);
-        document.getElementById('waiting-title').textContent = 'Peer disconnected';
-        document.getElementById('waiting-sub').textContent = 'Reload the page to start again';
-        document.getElementById('send-btn').disabled = true;
-      }
-    } else if (myRole === 'caller' && s.exists() && !s.child('callee').exists() && callStarted) {
-      setStatus('Peer disconnected', 'connecting');
-      addSystemMsg('Peer disconnected');
+    if (!s.exists() && myRole === 'callee') {
+      setStatus('Peer disconnected', 'error');
+      addSystemMsg('Peer disconnected — reload to reconnect');
+      showWaiting(true);
+      document.getElementById('waiting-title').textContent = 'Peer disconnected';
+      document.getElementById('waiting-sub').textContent = 'Reload the page to start again';
       document.getElementById('send-btn').disabled = true;
     }
   });
@@ -296,12 +317,14 @@ async function joinRoom() {
 }
 
 async function startCall(isCaller) {
+  dbg('startCall isCaller=' + isCaller);
   if (pc) { pc.close(); }
   pc = new RTCPeerConnection(iceConfig);
 
   if (localStream) localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
 
   pc.ontrack = (e) => {
+    dbg('got remote track');
     document.getElementById('remote-video').srcObject = e.streams[0];
     document.getElementById('video-placeholder').style.display = 'none';
   };
@@ -313,8 +336,11 @@ async function startCall(isCaller) {
     await set(ref(db, `rooms/${roomId}/${key}/${id}`), JSON.stringify(e.candidate.toJSON()));
   };
 
+  pc.oniceconnectionstatechange = () => dbg('ICE state: ' + pc.iceConnectionState);
+
   pc.onconnectionstatechange = () => {
     const s = pc.connectionState;
+    dbg('connection state: ' + s);
     if (s === 'connected') {
       setStatus('Secure P2P · encrypted', 'connected');
       addSystemMsg('🔐 P2P connection established · end-to-end encrypted');
@@ -330,15 +356,15 @@ async function startCall(isCaller) {
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     await set(ref(db, `rooms/${roomId}/offer`), JSON.stringify({ type: offer.type, sdp: offer.sdp }));
+    dbg('offer written to Firebase');
 
-    // Wait for answer
     const unsub = onValue(ref(db, `rooms/${roomId}/answer`), async (s) => {
       if (!s.exists() || pc.currentRemoteDescription) return;
+      dbg('got answer from Firebase');
       await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(s.val())));
     });
     unsubscribers.push(unsub);
 
-    // Watch callee ICE candidates
     const candUnsub = onValue(ref(db, `rooms/${roomId}/calleeCandidates`), (s) => {
       if (!s.exists() || !pc.remoteDescription) return;
       s.forEach(child => {
@@ -350,18 +376,18 @@ async function startCall(isCaller) {
   } else {
     pc.ondatachannel = (e) => { dataChannel = e.channel; setupDataChannel(dataChannel); };
 
-    // Wait for offer
     const unsub = onValue(ref(db, `rooms/${roomId}/offer`), async (s) => {
       if (!s.exists() || pc.currentRemoteDescription) return;
+      dbg('got offer from Firebase');
       const offer = JSON.parse(s.val());
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       await set(ref(db, `rooms/${roomId}/answer`), JSON.stringify({ type: answer.type, sdp: answer.sdp }));
+      dbg('answer written to Firebase');
     });
     unsubscribers.push(unsub);
 
-    // Watch caller ICE candidates
     const candUnsub = onValue(ref(db, `rooms/${roomId}/callerCandidates`), (s) => {
       if (!s.exists() || !pc.remoteDescription) return;
       s.forEach(child => {
@@ -373,7 +399,7 @@ async function startCall(isCaller) {
 }
 
 function setupDataChannel(dc) {
-  dc.onopen = () => { document.getElementById('send-btn').disabled = false; };
+  dc.onopen = () => { dbg('dataChannel open'); document.getElementById('send-btn').disabled = false; };
   dc.onclose = () => { document.getElementById('send-btn').disabled = true; };
   dc.onmessage = (e) => { const d = JSON.parse(e.data); addMessage(d.text, d.name, false); };
 }
