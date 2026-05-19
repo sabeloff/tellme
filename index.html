@@ -163,7 +163,7 @@
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getDatabase, ref, set, get, onValue, remove, onDisconnect, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+import { getDatabase, ref, set, get, onValue, remove, onDisconnect } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCYrOEgoEIwZ3i6BHqbW9dScpjXirS1IVA",
@@ -241,47 +241,35 @@ async function startMedia() {
 async function joinRoom() {
   const now = Date.now();
   const callerRef = ref(db, `rooms/${roomId}/caller`);
-  let iAmCaller = false;
 
-  dbg('running transaction to claim caller role...');
+  // Step 1: wait 1.5s so both browsers finish loading before we race
+  dbg('waiting 1.5s before claiming role...');
+  await new Promise(r => setTimeout(r, 1500));
 
-  try {
-    const result = await runTransaction(callerRef, (current) => {
-      // If no caller, or caller is stale (offline or old) — claim it
-      if (!current || current.online === false || (now - (current.ts || 0)) > 30000) {
-        return { name: myName, ts: now, online: true };
-      }
-      // Caller already exists and is fresh — abort (return undefined)
-      return undefined;
-    });
+  // Step 2: read current state
+  let snap;
+  try { snap = await get(callerRef); }
+  catch(e) { dbg('read error: ' + e.message); setStatus('Firebase error', 'error'); return; }
 
-    if (result.committed) {
-      iAmCaller = true;
-      dbg('transaction committed — I am CALLER');
-    } else {
-      iAmCaller = false;
-      dbg('transaction aborted — I am CALLEE');
-    }
-  } catch(e) {
-    dbg('transaction error: ' + e.message);
-    setStatus('Firebase error', 'error');
-    return;
-  }
+  const callerData = snap.val();
+  const age = callerData && callerData.ts ? Math.round((now - callerData.ts) / 1000) : 999;
+  const callerLive = callerData && callerData.online === true && age < 15;
+  dbg('callerData: ' + JSON.stringify(callerData) + ' | age: ' + age + 's | live: ' + callerLive);
 
-  if (iAmCaller) {
-    // CALLER role
+  if (!callerLive) {
+    // CALLER
     myRole = 'caller';
+    await set(callerRef, { name: myName, ts: Date.now(), online: true });
     onDisconnect(callerRef).update({ online: false });
+    dbg('I am CALLER');
 
     setStatus('Waiting for peer...', 'connecting');
     showWaiting(true);
-    dbg('waiting for callee...');
 
     const unsub = onValue(ref(db, `rooms/${roomId}/callee`), async (s) => {
       dbg('callee watcher: exists=' + s.exists() + ' started=' + callStarted);
       if (s.exists() && !callStarted) {
         callStarted = true;
-        // Clean stale signaling before starting
         try {
           await remove(ref(db, `rooms/${roomId}/offer`));
           await remove(ref(db, `rooms/${roomId}/answer`));
@@ -296,15 +284,15 @@ async function joinRoom() {
     unsubscribers.push(unsub);
 
   } else {
-    // CALLEE role
+    // CALLEE
     myRole = 'callee';
+    dbg('I am CALLEE');
     const calleeRef = ref(db, `rooms/${roomId}/callee`);
-    await set(calleeRef, { name: myName, ts: now, online: true });
+    await set(calleeRef, { name: myName, ts: Date.now(), online: true });
     onDisconnect(calleeRef).remove();
 
     showWaiting(false);
     setStatus('Caller found — connecting P2P...', 'connecting');
-    dbg('I am CALLEE, starting call...');
     await startCall(false);
   }
 
@@ -321,6 +309,7 @@ async function joinRoom() {
   });
   unsubscribers.push(watchUnsub);
 }
+
 
 async function startCall(isCaller) {
   dbg('startCall, isCaller=' + isCaller);
