@@ -163,7 +163,7 @@
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getDatabase, ref, set, get, onValue, remove, onDisconnect } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+import { getDatabase, ref, set, get, onValue, remove, onDisconnect, push } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCYrOEgoEIwZ3i6BHqbW9dScpjXirS1IVA",
@@ -184,11 +184,14 @@ const iceConfig = { iceServers: [
   { urls: 'stun:stun.cloudflare.com:3478' }
 ]};
 
+// Each person gets a unique ID for this session
+const myId = Math.random().toString(36).slice(2, 10);
+
 let pc, localStream, dataChannel;
-let myName = '', roomId = '', myRole = '';
+let myName = '', roomId = '';
 let micOn = true, camOn = true;
 let unsubscribers = [];
-let callStarted = false;
+let connected = false;
 
 function dbg(msg) {
   console.log('[DBG]', msg);
@@ -216,7 +219,7 @@ window.connect = async function() {
   roomId = await hashRoom(secret);
   document.getElementById('setup-screen').style.display = 'none';
   document.getElementById('app-screen').style.display = 'flex';
-  dbg('room hash: ' + roomId.slice(0,8) + '...');
+  dbg('myId: ' + myId + ' room: ' + roomId.slice(0,8));
   await startMedia();
   await joinRoom();
 };
@@ -230,90 +233,77 @@ async function startMedia() {
     try {
       localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       setStatus('Audio only', 'connecting');
-      dbg('mic only');
     } catch(e2) {
       setStatus('No media access', 'error');
-      dbg('ERROR: ' + e2.message);
     }
   }
 }
 
 async function joinRoom() {
-  const now = Date.now();
-  const callerRef = ref(db, `rooms/${roomId}/caller`);
+  // NEW APPROACH: no caller/callee roles at all
+  // Each person registers themselves with a unique ID and timestamp
+  // The one with the LOWER id (alphabetically first) becomes the initiator
+  // This is deterministic — no race condition possible
 
-  // Step 1: wait 1.5s so both browsers finish loading before we race
-  dbg('waiting 1.5s before claiming role...');
-  await new Promise(r => setTimeout(r, 1500));
+  const myRef = ref(db, `rooms/${roomId}/peers/${myId}`);
+  await set(myRef, { name: myName, ts: Date.now() });
+  onDisconnect(myRef).remove();
+  dbg('registered as peer ' + myId);
 
-  // Step 2: read current state
-  let snap;
-  try { snap = await get(callerRef); }
-  catch(e) { dbg('read error: ' + e.message); setStatus('Firebase error', 'error'); return; }
+  setStatus('Waiting for peer...', 'connecting');
+  showWaiting(true);
 
-  const callerData = snap.val();
-  const age = callerData && callerData.ts ? Math.round((now - callerData.ts) / 1000) : 999;
-  const callerLive = callerData && callerData.online === true && age < 15;
-  dbg('callerData: ' + JSON.stringify(callerData) + ' | age: ' + age + 's | live: ' + callerLive);
+  // Watch all peers in the room
+  const peersUnsub = onValue(ref(db, `rooms/${roomId}/peers`), async (snap) => {
+    if (!snap.exists()) return;
+    const peers = snap.val();
+    const ids = Object.keys(peers).sort(); // sort alphabetically
+    dbg('peers in room: ' + ids.join(', '));
 
-  if (!callerLive) {
-    // CALLER
-    myRole = 'caller';
-    await set(callerRef, { name: myName, ts: Date.now(), online: true });
-    onDisconnect(callerRef).update({ online: false });
-    dbg('I am CALLER');
+    if (ids.length < 2) return; // wait for second person
+    if (connected) return;
 
-    setStatus('Waiting for peer...', 'connecting');
-    showWaiting(true);
+    // Exactly 2 peers — determine roles by sorted ID
+    // Lower ID = initiator (creates offer), Higher ID = receiver
+    const [initiatorId, receiverId] = ids;
+    const iAmInitiator = myId === initiatorId;
+    dbg('I am ' + (iAmInitiator ? 'INITIATOR' : 'RECEIVER') + ' (my id: ' + myId + ')');
 
-    const unsub = onValue(ref(db, `rooms/${roomId}/callee`), async (s) => {
-      dbg('callee watcher: exists=' + s.exists() + ' started=' + callStarted);
-      if (s.exists() && !callStarted) {
-        callStarted = true;
-        try {
-          await remove(ref(db, `rooms/${roomId}/offer`));
-          await remove(ref(db, `rooms/${roomId}/answer`));
-          await remove(ref(db, `rooms/${roomId}/callerCandidates`));
-          await remove(ref(db, `rooms/${roomId}/calleeCandidates`));
-        } catch(e) {}
-        showWaiting(false);
-        setStatus('Peer joined — connecting P2P...', 'connecting');
-        await startCall(true);
-      }
-    });
-    unsubscribers.push(unsub);
-
-  } else {
-    // CALLEE
-    myRole = 'callee';
-    dbg('I am CALLEE');
-    const calleeRef = ref(db, `rooms/${roomId}/callee`);
-    await set(calleeRef, { name: myName, ts: Date.now(), online: true });
-    onDisconnect(calleeRef).remove();
-
+    connected = true;
     showWaiting(false);
-    setStatus('Caller found — connecting P2P...', 'connecting');
-    await startCall(false);
-  }
+    setStatus('Peer joined — connecting P2P...', 'connecting');
 
-  // Watch caller going offline
-  const watchUnsub = onValue(callerRef, (s) => {
-    if (myRole === 'callee' && s.exists() && s.val() && s.val().online === false) {
-      setStatus('Peer disconnected', 'error');
-      addSystemMsg('Peer disconnected — reload to reconnect');
-      showWaiting(true);
-      document.getElementById('waiting-title').textContent = 'Peer disconnected';
-      document.getElementById('waiting-sub').textContent = 'Reload the page to start again';
-      document.getElementById('send-btn').disabled = true;
+    // Clean stale signaling
+    try {
+      await remove(ref(db, `rooms/${roomId}/offer`));
+      await remove(ref(db, `rooms/${roomId}/answer`));
+      await remove(ref(db, `rooms/${roomId}/candidates`));
+    } catch(e) {}
+
+    await startCall(iAmInitiator);
+  });
+  unsubscribers.push(peersUnsub);
+
+  // Watch for peer leaving
+  const leaveUnsub = onValue(ref(db, `rooms/${roomId}/peers`), (snap) => {
+    if (!snap.exists() || Object.keys(snap.val()).length < 2) {
+      if (connected) {
+        setStatus('Peer disconnected', 'error');
+        addSystemMsg('Peer disconnected — reload to reconnect');
+        showWaiting(true);
+        document.getElementById('waiting-title').textContent = 'Peer disconnected';
+        document.getElementById('waiting-sub').textContent = 'Reload the page to start again';
+        document.getElementById('send-btn').disabled = true;
+        connected = false;
+      }
     }
   });
-  unsubscribers.push(watchUnsub);
+  unsubscribers.push(leaveUnsub);
 }
 
-
-async function startCall(isCaller) {
-  dbg('startCall, isCaller=' + isCaller);
-  if (pc) { pc.close(); }
+async function startCall(isInitiator) {
+  dbg('startCall isInitiator=' + isInitiator);
+  if (pc) pc.close();
   pc = new RTCPeerConnection(iceConfig);
 
   if (localStream) localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
@@ -324,17 +314,18 @@ async function startCall(isCaller) {
     document.getElementById('video-placeholder').style.display = 'none';
   };
 
+  // Both sides send candidates to the same place, tagged with sender id
   pc.onicecandidate = async (e) => {
     if (!e.candidate) return;
-    const key = isCaller ? 'callerCandidates' : 'calleeCandidates';
+    const candRef = ref(db, `rooms/${roomId}/candidates/${myId}`);
     const id = Date.now() + '_' + Math.random().toString(36).slice(2);
-    await set(ref(db, `rooms/${roomId}/${key}/${id}`), JSON.stringify(e.candidate.toJSON()));
+    await set(ref(db, `rooms/${roomId}/candidates/${myId}/${id}`), JSON.stringify(e.candidate.toJSON()));
   };
 
   pc.oniceconnectionstatechange = () => dbg('ICE: ' + pc.iceConnectionState);
   pc.onconnectionstatechange = () => {
     const s = pc.connectionState;
-    dbg('P2P state: ' + s);
+    dbg('P2P: ' + s);
     if (s === 'connected') {
       setStatus('🔐 Secure P2P · encrypted', 'connected');
       addSystemMsg('🔐 P2P connection established · end-to-end encrypted');
@@ -343,7 +334,8 @@ async function startCall(isCaller) {
     }
   };
 
-  if (isCaller) {
+  if (isInitiator) {
+    // Create data channel
     dataChannel = pc.createDataChannel('chat', { ordered: true });
     setupDataChannel(dataChannel);
 
@@ -352,6 +344,7 @@ async function startCall(isCaller) {
     await set(ref(db, `rooms/${roomId}/offer`), JSON.stringify({ type: offer.type, sdp: offer.sdp }));
     dbg('offer written');
 
+    // Wait for answer
     const unsub = onValue(ref(db, `rooms/${roomId}/answer`), async (s) => {
       if (!s.exists() || pc.currentRemoteDescription) return;
       dbg('got answer');
@@ -359,33 +352,35 @@ async function startCall(isCaller) {
     });
     unsubscribers.push(unsub);
 
-    const candUnsub = onValue(ref(db, `rooms/${roomId}/calleeCandidates`), (s) => {
-      if (!s.exists() || !pc.remoteDescription) return;
-      s.forEach(child => pc.addIceCandidate(new RTCIceCandidate(JSON.parse(child.val()))).catch(()=>{}));
-    });
-    unsubscribers.push(candUnsub);
-
   } else {
     pc.ondatachannel = (e) => { dataChannel = e.channel; setupDataChannel(dataChannel); };
 
+    // Wait for offer
     const unsub = onValue(ref(db, `rooms/${roomId}/offer`), async (s) => {
       if (!s.exists() || pc.currentRemoteDescription) return;
       dbg('got offer');
-      const offer = JSON.parse(s.val());
-      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(s.val())));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       await set(ref(db, `rooms/${roomId}/answer`), JSON.stringify({ type: answer.type, sdp: answer.sdp }));
       dbg('answer written');
     });
     unsubscribers.push(unsub);
-
-    const candUnsub = onValue(ref(db, `rooms/${roomId}/callerCandidates`), (s) => {
-      if (!s.exists() || !pc.remoteDescription) return;
-      s.forEach(child => pc.addIceCandidate(new RTCIceCandidate(JSON.parse(child.val()))).catch(()=>{}));
-    });
-    unsubscribers.push(candUnsub);
   }
+
+  // Both sides listen for the OTHER person's candidates
+  const peersSnap = await get(ref(db, `rooms/${roomId}/peers`));
+  const allIds = Object.keys(peersSnap.val()).sort();
+  const peerId = allIds.find(id => id !== myId);
+  dbg('listening for candidates from: ' + peerId);
+
+  const candUnsub = onValue(ref(db, `rooms/${roomId}/candidates/${peerId}`), (s) => {
+    if (!s.exists() || !pc.remoteDescription) return;
+    s.forEach(child => {
+      pc.addIceCandidate(new RTCIceCandidate(JSON.parse(child.val()))).catch(() => {});
+    });
+  });
+  unsubscribers.push(candUnsub);
 }
 
 function setupDataChannel(dc) {
