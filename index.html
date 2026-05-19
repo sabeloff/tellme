@@ -638,8 +638,7 @@ async function startAsInitiator() {
 
   await waitForIceGathering(pc);
 
-  const payload = JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type });
-  const encoded = btoa(payload);
+  const encoded = await compress({ sdp: pc.localDescription.sdp, type: pc.localDescription.type });
   document.getElementById('offer-box').textContent = encoded;
 }
 
@@ -671,7 +670,7 @@ async function processCode() {
   if (!raw) { alert('Paste the code first'); return; }
 
   let data;
-  try { data = JSON.parse(atob(raw)); } catch(e) { alert('Invalid code — make sure you copied the full text'); return; }
+  try { data = JSON.parse(await decompress(raw)); } catch(e) { alert('Invalid code — make sure you copied the full text'); return; }
 
   if (phase === 'receiver') {
     // This is the offer — create answer
@@ -686,8 +685,7 @@ async function processCode() {
 
     await waitForIceGathering(pc);
 
-    const payload = JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type });
-    const encoded = btoa(payload);
+    const encoded = await compress({ sdp: pc.localDescription.sdp, type: pc.localDescription.type });
 
     // Show answer to copy
     document.getElementById('paste-step-num').textContent = 'Step 2 of 2 · Send this answer back';
@@ -857,6 +855,54 @@ function copyText(text, el) {
 function esc(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
+
+// ── Compress/Decompress using DecompressionStream API ──
+async function compress(obj) {
+  const json = JSON.stringify(obj);
+  const stream = new CompressionStream('gzip');
+  const writer = stream.writable.getWriter();
+  writer.write(new TextEncoder().encode(json));
+  writer.close();
+  const chunks = [];
+  const reader = stream.readable.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+  }
+  const total = chunks.reduce((a, c) => a + c.length, 0);
+  const buf = new Uint8Array(total);
+  let pos = 0;
+  for (const c of chunks) { buf.set(c, pos); pos += c.length; }
+  // base64url (no +/= to avoid paste issues)
+  return btoa(String.fromCharCode(...buf)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+}
+
+async function decompress(str) {
+  // restore base64
+  const b64 = str.replace(/-/g,'+').replace(/_/g,'/');
+  const pad = b64.length % 4 ? '='.repeat(4 - b64.length % 4) : '';
+  const binary = atob(b64 + pad);
+  const buf = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) buf[i] = binary.charCodeAt(i);
+  const stream = new DecompressionStream('gzip');
+  const writer = stream.writable.getWriter();
+  writer.write(buf);
+  writer.close();
+  const chunks = [];
+  const reader = stream.readable.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+  }
+  const total = chunks.reduce((a, c) => a + c.length, 0);
+  const out = new Uint8Array(total);
+  let pos = 0;
+  for (const c of chunks) { out.set(c, pos); pos += c.length; }
+  return new TextDecoder().decode(out);
+}
+
 </script>
 </body>
 </html>
