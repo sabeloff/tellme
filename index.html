@@ -687,28 +687,20 @@ async function processCode() {
 
     const encoded = await compress({ sdp: pc.localDescription.sdp, type: pc.localDescription.type });
 
-    // Show answer to copy
-    document.getElementById('paste-step-num').textContent = 'Step 2 of 2 · Send this answer back';
-    document.getElementById('paste-title').textContent = 'Send this code to your contact';
-    document.getElementById('paste-desc').textContent = 'Copy the code below and send it back to the person who invited you. Once they paste it, the call will connect automatically.';
-    document.getElementById('answer-status-text').textContent = 'send answer to contact';
-    document.getElementById('paste-input').style.display = 'none';
+    // Show a dedicated "copy answer" screen
+    showScreen('screen-offer');
+    document.querySelector('#screen-offer .step-header .step-num').textContent = 'Step 2 of 2 · You are the receiver';
+    document.querySelector('#screen-offer .step-header .step-title').textContent = 'Send this code back to your contact';
+    document.querySelector('#screen-offer .step-header .step-desc').textContent = 'Copy the code below and send it back. Once they paste it, the call connects automatically.';
+    document.getElementById('offer-box').textContent = encoded;
+    document.getElementById('offer-box').onclick = () => copyText(encoded, document.getElementById('offer-box'));
 
-    // Insert answer box
-    const existing = document.getElementById('generated-answer');
-    if (existing) existing.remove();
-    const box = document.createElement('div');
-    box.id = 'generated-answer';
-    box.className = 'code-box';
-    box.textContent = encoded;
-    box.onclick = () => copyText(encoded, box);
-    document.querySelector('#screen-answer-input .step-content').insertBefore(box, document.querySelector('.btn-row'));
-
-    document.querySelector('.btn-row').innerHTML = `<button class="btn" onclick="copyText('${encoded}', this)"><span>Copy answer code</span></button>`;
-
-    // App will connect automatically via onconnectionstatechange
-    showScreen('screen-app');
-    setAppStatus('Waiting for contact to paste answer...', 'yellow');
+    // Replace bottom buttons
+    document.querySelector('#screen-offer .btn-row').innerHTML = `
+      <button class="btn btn-secondary" onclick="copyText('${encoded}', this)"><span>Copy code</span></button>
+      <button class="btn" onclick="receiverGoToApp()"><span>I sent it →</span></button>
+    `;
+    window._receiverEncoded = encoded;
 
   } else if (phase === 'waitAnswer') {
     // This is the answer from receiver
@@ -855,6 +847,12 @@ function copyText(text, el) {
 function esc(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
+
+
+window.receiverGoToApp = function() {
+  showScreen('screen-app');
+  setAppStatus('Waiting for contact to complete connection...', 'yellow');
+};
 
 // ── Compress/Decompress using DecompressionStream API ──
 async function compress(obj) {
